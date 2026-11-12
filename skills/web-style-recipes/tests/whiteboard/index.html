@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dex 的點子牆</title>
+<style>
+  :root {
+    --wall: #e9e9ec;
+    --ink: #3a3a3a;
+    --hand: "Hannotate TC", "HanziPen TC", "Yuppy TC", "Kaiti TC", "BiauKai", "DFKai-SB", "Comic Sans MS", cursive;
+    --nw: 176px;
+    --tool: 48px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    height: 100vh; height: 100dvh;
+    overflow: hidden;
+    background: var(--wall);
+    color: var(--ink);
+    font-family: var(--hand);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    padding: 14px;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  /* ---------- 工具列 ---------- */
+  .toolbar {
+    display: flex; flex-direction: column; gap: 8px; align-self: center;
+    background: #fff; padding: 10px; border-radius: 16px;
+    box-shadow: 0 2px 0 #d3d3d8, 0 8px 18px rgba(0,0,0,.08);
+  }
+  .toolbar .sep { height: 1px; background: #e3e3e8; margin: 2px 4px; }
+  .tool {
+    width: var(--tool); height: var(--tool);
+    border: 2px solid transparent; border-radius: 12px;
+    background: transparent; font-size: 22px; line-height: 1;
+    cursor: pointer; display: grid; place-items: center; position: relative;
+    font-family: inherit; color: inherit;
+  }
+  .tool:hover { background: #f2f2f5; }
+  .tool[aria-pressed="true"] { background: #fff3a3; border-color: #3a3a3a; }
+  .tool:disabled { opacity: .35; cursor: default; }
+  .tool:focus-visible { outline: 3px solid #4a7bd6; outline-offset: 2px; }
+  .tool small { position: absolute; bottom: -1px; font-size: 10px; opacity: .65; }
+
+  /* ---------- 白板 ---------- */
+  .board {
+    position: relative; overflow: hidden; border-radius: 14px;
+    background-color: #fff;
+    background-image: radial-gradient(circle, #d9dbe3 1.2px, transparent 1.4px);
+    background-size: 24px 24px;
+    border: 6px solid #f7f7f9;
+    box-shadow: 0 0 0 2px #c9c9d0, 0 14px 30px rgba(0,0,0,.14);
+    touch-action: none;
+    min-height: 0;
+  }
+  .board.tool-pen, .board.tool-hl { cursor: crosshair; }
+  .board.tool-eraser { cursor: cell; }
+  .board.tool-star, .board.tool-note { cursor: copy; }
+
+  .title {
+    position: absolute; left: 22px; top: 14px; z-index: 1; pointer-events: none;
+  }
+  .title h1 {
+    margin: 0; font-size: clamp(26px, 4vw, 44px); line-height: 1.15; font-weight: 700;
+    display: inline-block; transform: rotate(-1.5deg);
+    background: linear-gradient(transparent 62%, rgba(255, 225, 77, .75) 62% 92%, transparent 92%);
+    padding: 0 6px;
+  }
+  .title p { margin: 4px 0 0 6px; font-size: 15px; opacity: .6; }
+
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #hl { mix-blend-mode: multiply; z-index: 5; }
+  #ink { z-index: 6; }
+  .layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+
+  /* ---------- 便利貼 ---------- */
+  .note {
+    position: absolute; width: var(--nw); height: calc(var(--nw) * .95);
+    padding: 26px 14px 12px; border-radius: 3px;
+    background: var(--c); transform: rotate(var(--rot));
+    box-shadow: 0 2px 3px rgba(0,0,0,.12), 0 8px 14px rgba(0,0,0,.1);
+    transition: transform .15s ease, box-shadow .15s ease;
+    pointer-events: none;
+  }
+  .tool-move .note, .tool-note .note { pointer-events: auto; }
+  .note.lifted, .sticker.lifted {
+    transform: rotate(0deg) scale(1.04);
+    box-shadow: 0 4px 6px rgba(0,0,0,.14), 0 18px 28px rgba(0,0,0,.22);
+    z-index: 50;
+  }
+  .note .tape {
+    position: absolute; left: 50%; top: -12px; width: 84px; height: 30px;
+    margin-left: -42px; transform: rotate(-2deg);
+    background: rgba(255,255,255,.55);
+    border: 1px solid rgba(0,0,0,.08);
+    box-shadow: 0 1px 2px rgba(0,0,0,.08);
+    cursor: grab; touch-action: none;
+  }
+  .note.lifted .tape { cursor: grabbing; }
+  .note .text {
+    width: 100%; height: 100%; overflow: auto; outline: none;
+    font-size: 18px; line-height: 1.4; white-space: pre-wrap; word-break: break-word;
+    -webkit-user-select: text; user-select: text; cursor: text;
+  }
+  .note .del {
+    position: absolute; right: 2px; top: 2px; width: 26px; height: 26px;
+    border: 0; background: transparent; font-size: 16px; opacity: 0; cursor: pointer;
+    color: inherit; border-radius: 50%;
+  }
+  .note:hover .del, .note:focus-within .del { opacity: .55; }
+  .note .del:hover { opacity: 1; background: rgba(0,0,0,.08); }
+  @media (pointer: coarse) { .note .del { opacity: .45; width: 32px; height: 32px; } }
+
+  .sticker {
+    position: absolute; width: 36px; height: 36px; font-size: 32px; line-height: 36px;
+    text-align: center; transform: rotate(var(--rot));
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,.25));
+    transition: transform .15s ease; pointer-events: none;
+  }
+  .tool-move .sticker { pointer-events: auto; cursor: grab; touch-action: none; }
+
+  /* ---------- 色盤 / 提示 / 確認卡 ---------- */
+  .palette {
+    position: absolute; right: 12px; top: 12px; z-index: 20;
+    display: none; gap: 8px; padding: 8px 10px; background: #fff; border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  }
+  .palette.show { display: flex; }
+  .swatch {
+    width: 30px; height: 30px; border-radius: 50%; border: 3px solid #fff;
+    box-shadow: 0 0 0 1.5px #999; background: var(--c); cursor: pointer; padding: 0;
+  }
+  .swatch[aria-pressed="true"] { box-shadow: 0 0 0 3px #3a3a3a; }
+  .swatch:focus-visible { outline: 3px solid #4a7bd6; outline-offset: 3px; }
+
+  .toast {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30;
+    background: #3a3a3a; color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 15px;
+    opacity: 0; pointer-events: none; transition: opacity .2s; max-width: 90%; text-align: center;
+  }
+  .toast.show { opacity: 1; }
+
+  .confirm {
+    position: absolute; inset: 0; z-index: 40; display: none;
+    place-items: center; background: rgba(255,255,255,.6);
+  }
+  .confirm.show { display: grid; }
+  .confirm .card {
+    background: #fff3a3; padding: 22px 26px; border-radius: 4px; transform: rotate(-1.5deg);
+    box-shadow: 0 10px 28px rgba(0,0,0,.25); text-align: center; font-size: 20px;
+  }
+  .confirm .row { display: flex; gap: 12px; justify-content: center; margin-top: 14px; }
+  .btn {
+    font: inherit; font-size: 17px; padding: 10px 18px; min-height: 44px; border-radius: 10px;
+    border: 2px solid #3a3a3a; background: #fff; cursor: pointer; color: inherit;
+  }
+  .btn.danger { background: #ffd1dc; }
+  .btn:focus-visible { outline: 3px solid #4a7bd6; outline-offset: 2px; }
+
+  /* ---------- 手機：工具列移底部 ---------- */
+  @media (max-width: 700px) {
+    :root { --nw: 132px; --tool: 44px; }
+    body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; gap: 10px; padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    .board { grid-row: 1; }
+    .toolbar {
+      grid-row: 2; flex-direction: row; flex-wrap: wrap; justify-content: center;
+      align-self: stretch; gap: 4px; padding: 6px;
+    }
+    .toolbar .sep { display: none; }
+    .tool small { display: none; }
+    .note .text { font-size: 15px; }
+    .note { padding: 24px 10px 8px; }
+    .title p { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .note, .sticker, .toast { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="toolbar" aria-label="白板工具">
+  <button class="tool" data-tool="move" aria-label="移動" title="移動 (V)">✋<small>移動</small></button>
+  <button class="tool" data-tool="note" aria-label="新增便利貼" title="便利貼 (N)">🗒️<small>貼紙</small></button>
+  <button class="tool" data-tool="pen" aria-label="畫筆" title="畫筆 (P)">✏️<small>畫筆</small></button>
+  <button class="tool" data-tool="hl" aria-label="螢光筆" title="螢光筆 (H)">🖍️<small>螢光</small></button>
+  <button class="tool" data-tool="eraser" aria-label="橡皮擦（整筆擦除）" title="橡皮擦 (E)">🧽<small>橡皮</small></button>
+  <button class="tool" data-tool="star" aria-label="星星貼紙" title="星星 (S)">⭐<small>星星</small></button>
+  <div class="sep"></div>
+  <button class="tool" id="undo" aria-label="復原" title="復原 (Ctrl/Cmd+Z)">↶</button>
+  <button class="tool" id="redo" aria-label="重做" title="重做 (Shift+Ctrl/Cmd+Z)">↷</button>
+  <button class="tool" id="clear" aria-label="清空白板" title="清空">🗑️</button>
+</nav>
+
+<main class="board tool-move" id="board">
+  <div class="title">
+    <h1>Dex 的點子牆</h1>
+    <p>拖紙膠帶移動 · 雙擊空白處貼新便利貼</p>
+  </div>
+  <div class="layer" id="layer"></div>
+  <canvas id="hl" aria-hidden="true"></canvas>
+  <canvas id="ink" aria-hidden="true"></canvas>
+  <div class="palette" id="palette" role="group" aria-label="顏色"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="confirm" id="confirm" role="alertdialog" aria-label="確定清空">
+    <div class="card">
+      <div>確定清空整面白板？</div>
+      <div class="row">
+        <button class="btn danger" id="confirmYes">確定清空</button>
+        <button class="btn" id="confirmNo">取消</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const STORAGE_KEY = 'dex-idea-wall-v1';
+  const NOTE_COLORS = ['#fff3a3', '#ffd1dc', '#cde7ff', '#d5f5c8', '#ffd9b0'];
+  const PALETTES = {
+    pen: ['#2b3a67', '#d64550', '#2f8f5b'],
+    hl: ['#ffe14d', '#ff9ec4', '#8fe3ff'],
+  };
+  const PEN_W = 3.5;
+  const HL_W = 22;
+  const STICKER = 36;
+  const HISTORY_MAX = 100;
+
+  const $ = (id) => document.getElementById(id);
+  const board = $('board'), layer = $('layer'), toast = $('toast');
+  const inkCv = $('ink'), hlCv = $('hl');
+  const inkCtx = inkCv.getContext('2d'), hlCtx = hlCv.getContext('2d');
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const uid = () => Math.random().toString(36).slice(2, 9);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  /* ---------- 狀態（不可變更新＋歷史堆疊） ---------- */
+  const seed = () => ({
+    notes: [
+      { id: uid(), x: .03, y: .26, rot: -2,   c: NOTE_COLORS[0], t: '嗨，我是 Dex\n資料工程 × 後端 × AI 應用' },
+      { id: uid(), x: .30, y: .12, rot: 2,    c: NOTE_COLORS[1], t: '最近在玩：\nAgent 管線、知識庫、讀書會自動化' },
+      { id: uid(), x: .58, y: .22, rot: -1.5, c: NOTE_COLORS[2], t: '點子：把每週學到的東西做成一張卡' },
+      { id: uid(), x: .84, y: .08, rot: 2.5,  c: NOTE_COLORS[3], t: '待驗證：\nCloud Run 免費額度夠不夠用？' },
+      { id: uid(), x: .46, y: .64, rot: -2.5, c: NOTE_COLORS[4], t: '想聊聊？\n雙擊白板貼一張給我' },
+      { id: uid(), x: .12, y: .70, rot: 1.5,  c: NOTE_COLORS[0], t: '好點子先貼上來，\n之後再整理' },
+    ],
+    strokes: [],
+    stickers: [
+      { id: uid(), x: .97, y: .95, rot: 12 },
+      { id: uid(), x: .02, y: .96, rot: -10 },
+      { id: uid(), x: .70, y: .03, rot: 8 },
+    ],
+  });
+
+  const isValid = (s) => s && Array.isArray(s.notes) && Array.isArray(s.strokes) && Array.isArray(s.stickers);
+
+  let storageOk = true;
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (isValid(s)) return s;
+      }
+    } catch (e) { storageOk = false; }
+    return seed();
+  }
+  function save() {
+    if (!storageOk) return;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch (e) { storageOk = false; showToast('這次不會保存（瀏覽器不允許儲存）', 4000); }
+  }
+
+  let state = load();
+  let history = [state];
+  let hIdx = 0;
+
+  function commit(next) {
+    history = [...history.slice(0, hIdx + 1), next].slice(-HISTORY_MAX);
+    hIdx = history.length - 1;
+    state = next;
+    save(); renderAll();
+  }
+  function undo() { if (hIdx > 0) { state = history[--hIdx]; save(); renderAll(); } }
+  function redo() { if (hIdx < history.length - 1) { state = history[++hIdx]; save(); renderAll(); } }
+
+  /* ---------- UI 狀態 ---------- */
+  const ui = { tool: 'move', color: { pen: PALETTES.pen[0], hl: PALETTES.hl[0] } };
+  let W = 1, H = 1, NW = 176;
+  let toastTimer = 0;
+  function showToast(msg, ms = 2200) {
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), ms);
+  }
+
+  function setTool(t) {
+    ui.tool = t;
+    board.className = 'board tool-' + t;
+    document.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+    renderPalette();
+  }
+  function renderPalette() {
+    const pal = $('palette');
+    const list = PALETTES[ui.tool];
+    pal.classList.toggle('show', !!list);
+    pal.replaceChildren();
+    if (!list) return;
+    list.forEach((c) => {
+      const b = document.createElement('button');
+      b.className = 'swatch'; b.style.setProperty('--c', c);
+      b.setAttribute('aria-label', '顏色 ' + c);
+      b.setAttribute('aria-pressed', String(ui.color[ui.tool] === c));
+      b.addEventListener('click', () => { ui.color[ui.tool] = c; renderPalette(); });
+      pal.appendChild(b);
+    });
+  }
+
+  /* ---------- 版面尺寸 ---------- */
+  const noteH = () => NW * 0.95;
+  function measure() {
+    const r = board.getBoundingClientRect();
+    const cs = getComputedStyle(board);
+    W = board.clientWidth; H = board.clientHeight;
+    NW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nw')) || 176;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (const cv of [inkCv, hlCv]) {
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    }
+    inkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    hlCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return r && cs;
+  }
+  const px = (frac, size, total) => frac * Math.max(0, total - size);
+  const frac = (p, size, total) => { const room = Math.max(1, total - size); return clamp(p / room, 0, 1); };
+
+  /* ---------- 渲染：便利貼與貼紙 ---------- */
+  function renderLayer() {
+    const frag = document.createDocumentFragment();
+    state.notes.forEach((n) => frag.appendChild(buildNote(n)));
+    state.stickers.forEach((s) => frag.appendChild(buildSticker(s)));
+    layer.replaceChildren(frag);
+  }
+
+  function buildNote(n) {
+    const el = document.createElement('div');
+    el.className = 'note'; el.dataset.id = n.id;
+    el.style.setProperty('--c', n.c); el.style.setProperty('--rot', n.rot + 'deg');
+    el.style.left = px(n.x, NW, W) + 'px';
+    el.style.top = px(n.y, noteH(), H) + 'px';
+
+    const tape = document.createElement('div'); tape.className = 'tape'; tape.title = '拖曳移動';
+    const text = document.createElement('div'); text.className = 'text';
+    text.setAttribute('contenteditable', 'plaintext-only');
+    text.setAttribute('role', 'textbox'); text.setAttribute('aria-label', '便利貼內容');
+    text.textContent = n.t;
+    text.addEventListener('blur', () => {
+      const t = text.innerText.replace(/\n$/, '');
+      if (t === n.t) return;
+      commit({ ...state, notes: state.notes.map((m) => (m.id === n.id ? { ...m, t } : m)) });
+    });
+    const del = document.createElement('button'); del.className = 'del'; del.textContent = '✕';
+    del.setAttribute('aria-label', '刪除這張便利貼');
+    del.addEventListener('click', () => commit({ ...state, notes: state.notes.filter((m) => m.id !== n.id) }));
+
+    el.append(tape, del, text);
+    makeDraggable(tape, el, 'notes', n.id, () => NW, noteH);
+    return el;
+  }
+
+  function buildSticker(s) {
+    const el = document.createElement('div');
+    el.className = 'sticker'; el.dataset.id = s.id; el.textContent = '⭐';
+    el.setAttribute('aria-hidden', 'true');
+    el.style.setProperty('--rot', s.rot + 'deg');
+    el.style.left = px(s.x, STICKER, W) + 'px';
+    el.style.top = px(s.y, STICKER, H) + 'px';
+    makeDraggable(el, el, 'stickers', s.id, () => STICKER, () => STICKER);
+    return el;
+  }
+
+  /* ---------- 拖曳（Pointer Events＋setPointerCapture） ---------- */
+  function makeDraggable(handle, el, key, id, getW, getH) {
+    let start = null;
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || (ui.tool !== 'move' && ui.tool !== 'note')) return;
+      e.preventDefault(); e.stopPropagation();
+      handle.setPointerCapture(e.pointerId);
+      start = { dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop, moved: false, left: el.offsetLeft, top: el.offsetTop };
+      el.classList.add('lifted');
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      start.left = clamp(e.clientX - start.dx, 0, Math.max(0, W - getW()));
+      start.top = clamp(e.clientY - start.dy, 0, Math.max(0, H - getH()));
+      start.moved = true;
+      el.style.left = start.left + 'px'; el.style.top = start.top + 'px';
+    });
+    const end = () => {
+      if (!start) return;
+      const s = start; start = null;
+      el.classList.remove('lifted');
+      if (!s.moved) return;
+      const x = frac(s.left, getW(), W), y = frac(s.top, getH(), H);
+      const moved = state[key].find((m) => m.id === id);
+      if (!moved) return;
+      const rest = state[key].filter((m) => m.id !== id);
+      commit({ ...state, [key]: [...rest, { ...moved, x, y }] });
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  /* ---------- 新增便利貼 / 貼紙 ---------- */
+  function addNoteAt(clientX, clientY) {
+    const r = board.getBoundingClientRect();
+    const left = clamp(clientX - r.left - board.clientLeft - NW / 2, 0, Math.max(0, W - NW));
+    const top = clamp(clientY - r.top - board.clientTop - 20, 0, Math.max(0, H - noteH()));
+    const n = {
+      id: uid(), x: frac(left, NW, W), y: frac(top, noteH(), H),
+      rot: +rand(-3, 3).toFixed(1), c: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)], t: '',
+    };
+    commit({ ...state, notes: [...state.notes, n] });
+    setTool('move');
+    const t = layer.querySelector(`[data-id="${n.id}"] .text`);
+    if (t) t.focus();
+  }
+  function addStickerAt(clientX, clientY) {
+    const p = boardPoint(clientX, clientY);
+    const s = {
+      id: uid(), rot: Math.round(rand(-20, 20)),
+      x: frac(p.x - STICKER / 2, STICKER, W), y: frac(p.y - STICKER / 2, STICKER, H),
+    };
+    commit({ ...state, stickers: [...state.stickers, s] });
+  }
+
+  /* ---------- 畫筆 / 螢光筆 / 橡皮擦 ---------- */
+  function boardPoint(clientX, clientY) {
+    const r = board.getBoundingClientRect();
+    return { x: clientX - r.left - board.clientLeft, y: clientY - r.top - board.clientTop };
+  }
+
+  function renderStrokes() {
+    inkCtx.clearRect(0, 0, W, H); hlCtx.clearRect(0, 0, W, H);
+    const all = draft ? [...state.strokes, draft] : state.strokes;
+    all.forEach(drawStroke);
+  }
+  function drawStroke(s) {
+    const ctx = s.kind === 'pen' ? inkCtx : hlCtx;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.w;
+    if (s.kind === 'hl') { ctx.globalAlpha = .55; ctx.globalCompositeOperation = 'multiply'; }
+    ctx.beginPath();
+    const [fx, fy] = s.pts[0];
+    ctx.moveTo(fx * W, fy * H);
+    if (s.pts.length === 1) ctx.lineTo(fx * W + .01, fy * H);
+    for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i][0] * W, s.pts[i][1] * H);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function distToSeg(px_, py_, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 ? clamp(((px_ - ax) * dx + (py_ - ay) * dy) / len2, 0, 1) : 0;
+    return Math.hypot(px_ - (ax + t * dx), py_ - (ay + t * dy));
+  }
+  function strokeHit(s, x, y) {
+    const reach = s.w / 2 + 10;
+    if (s.pts.length === 1) return Math.hypot(x - s.pts[0][0] * W, y - s.pts[0][1] * H) <= reach;
+    for (let i = 1; i < s.pts.length; i++) {
+      const [ax, ay] = s.pts[i - 1], [bx, by] = s.pts[i];
+      if (distToSeg(x, y, ax * W, ay * H, bx * W, by * H) <= reach) return true;
+    }
+    return false;
+  }
+  function erasePoint(x, y) {
+    const hitStroke = [...state.strokes].reverse().find((s) => strokeHit(s, x, y));
+    if (hitStroke) return commit({ ...state, strokes: state.strokes.filter((s) => s.id !== hitStroke.id) });
+    const hitSticker = [...state.stickers].reverse().find((s) => {
+      const cx = px(s.x, STICKER, W) + STICKER / 2, cy = px(s.y, STICKER, H) + STICKER / 2;
+      return Math.hypot(x - cx, y - cy) <= STICKER / 2 + 8;
+    });
+    if (hitSticker) commit({ ...state, stickers: state.stickers.filter((s) => s.id !== hitSticker.id) });
+  }
+
+  let draft = null;
+  board.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.note, .sticker, .palette, .confirm')) return;
+    const p = boardPoint(e.clientX, e.clientY);
+    switch (ui.tool) {
+      case 'pen':
+      case 'hl':
+        board.setPointerCapture(e.pointerId);
+        draft = {
+          id: uid(), kind: ui.tool, color: ui.color[ui.tool],
+          w: ui.tool === 'pen' ? PEN_W : HL_W, pts: [[p.x / W, p.y / H]],
+        };
+        renderStrokes();
+        break;
+      case 'eraser': erasePoint(p.x, p.y); break;
+      case 'star': addStickerAt(e.clientX, e.clientY); break;
+      case 'note': addNoteAt(e.clientX, e.clientY); break;
+      default: break;
+    }
+  });
+  board.addEventListener('pointermove', (e) => {
+    if (!draft) return;
+    const p = boardPoint(e.clientX, e.clientY);
+    draft = { ...draft, pts: [...draft.pts, [p.x / W, p.y / H]] };
+    renderStrokes();
+  });
+  const finishStroke = () => {
+    if (!draft) return;
+    const s = draft; draft = null;
+    commit({ ...state, strokes: [...state.strokes, s] });
+  };
+  board.addEventListener('pointerup', finishStroke);
+  board.addEventListener('pointercancel', finishStroke);
+
+  // 雙擊白板空白處新增（只認空白處，避開便利貼內文字選取）
+  board.addEventListener('dblclick', (e) => {
+    if (ui.tool !== 'move' || e.target.closest('.note, .sticker, .palette, .confirm')) return;
+    addNoteAt(e.clientX, e.clientY);
+  });
+
+  /* ---------- 工具列 / 快捷鍵 / 清空確認 ---------- */
+  document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  $('undo').addEventListener('click', undo);
+  $('redo').addEventListener('click', redo);
+
+  const confirmEl = $('confirm');
+  const openConfirm = () => { confirmEl.classList.add('show'); $('confirmNo').focus(); };
+  const closeConfirm = () => confirmEl.classList.remove('show');
+  $('clear').addEventListener('click', openConfirm);
+  $('confirmNo').addEventListener('click', closeConfirm);
+  $('confirmYes').addEventListener('click', () => { closeConfirm(); commit({ notes: [], strokes: [], stickers: [] }); });
+
+  const KEYS = { v: 'move', n: 'note', p: 'pen', h: 'hl', e: 'eraser', s: 'star' };
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeConfirm();
+    if (e.target.closest && e.target.closest('[contenteditable]')) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (!mod && !e.altKey && KEYS[e.key.toLowerCase()]) setTool(KEYS[e.key.toLowerCase()]);
+  });
+
+  /* ---------- 渲染總成 ---------- */
+  function renderAll() {
+    renderLayer(); renderStrokes();
+    $('undo').disabled = hIdx === 0;
+    $('redo').disabled = hIdx === history.length - 1;
+  }
+
+  function relayout() { measure(); renderAll(); }
+  new ResizeObserver(relayout).observe(board);
+
+  setTool('move');
+  relayout();
+})();
+</script>
+</body>
+</html>

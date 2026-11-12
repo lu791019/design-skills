@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dex Lab — 熱像觀察室</title>
+<meta name="description" content="Dex Lab：用熱像儀的眼睛，觀察肉眼看不見的溫度。">
+<style>
+  :root {
+    --bg: #05081a;
+    --ink: rgba(255, 255, 255, .92);
+    --dim: rgba(255, 255, 255, .55);
+    --line: rgba(255, 255, 255, .38);
+    --rec: #ff3b30;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --m: clamp(14px, 2.4vw, 28px);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); }
+  body {
+    height: 100vh; height: 100dvh; overflow: hidden;
+    font-family: var(--sans); -webkit-font-smoothing: antialiased;
+  }
+  #heat {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    display: block; touch-action: none; cursor: crosshair;
+    image-rendering: auto;
+  }
+  /* 掃描線與暗角 */
+  .scan, .vignette { position: fixed; inset: 0; pointer-events: none; }
+  .scan {
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,.16) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+  }
+  .vignette { background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(2,4,14,.7) 100%); }
+
+  /* HUD */
+  .hud { position: fixed; inset: 0; pointer-events: none; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; }
+  .corner { position: absolute; width: 28px; height: 28px; border: 0 solid var(--line); }
+  .corner.tl { top: var(--m); left: var(--m); border-top-width: 2px; border-left-width: 2px; }
+  .corner.tr { top: var(--m); right: var(--m); border-top-width: 2px; border-right-width: 2px; }
+  .corner.bl { bottom: var(--m); left: var(--m); border-bottom-width: 2px; border-left-width: 2px; }
+  .corner.br { bottom: var(--m); right: var(--m); border-bottom-width: 2px; border-right-width: 2px; }
+  .status { position: absolute; top: calc(var(--m) + 10px); left: calc(var(--m) + 42px); display: grid; gap: 4px; }
+  .rec { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+  .rec i { width: 10px; height: 10px; border-radius: 50%; background: var(--rec); animation: blink 1.2s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .status small { color: var(--dim); font-size: 11px; }
+  .meta { position: absolute; top: calc(var(--m) + 10px); right: calc(var(--m) + 42px); text-align: right; color: var(--dim); display: grid; gap: 4px; }
+  .meta b { color: var(--ink); font-weight: 500; }
+
+  .scale {
+    position: absolute; right: calc(var(--m) + 8px); top: 50%; transform: translateY(-50%);
+    height: min(48vh, 360px); display: flex; gap: 8px; align-items: stretch;
+  }
+  .scale .bar { width: 10px; border: 1px solid var(--line); }
+  .scale ol { list-style: none; padding: 0; display: flex; flex-direction: column; justify-content: space-between; color: var(--dim); font-size: 11px; text-align: right; }
+
+  /* 鎖定框 */
+  .lock { position: absolute; left: 0; top: 0; will-change: transform; }
+  .lock .box { position: absolute; left: 0; top: 0; border: 1px solid rgba(255,255,255,.75); transform: translate(-50%, -50%); }
+  .lock .box::before, .lock .box::after { content: ""; position: absolute; width: 10px; height: 10px; border: 0 solid #fff; }
+  .lock .box::before { top: -3px; left: -3px; border-top-width: 2px; border-left-width: 2px; }
+  .lock .box::after { bottom: -3px; right: -3px; border-bottom-width: 2px; border-right-width: 2px; }
+  .lock .tag { position: absolute; white-space: nowrap; color: #fff; text-shadow: 0 0 6px rgba(0,0,0,.8); line-height: 1.5; }
+  .lock .tag b { font-weight: 600; font-size: 15px; }
+
+  /* 品牌與主標 */
+  .brand { position: fixed; left: var(--m); bottom: var(--m); padding: 0 0 0 calc(14px + 8px); max-width: min(560px, 86vw); pointer-events: none; }
+  .brand .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .24em; color: var(--dim); text-transform: uppercase; margin-bottom: 10px; }
+  .brand h1 {
+    font-size: clamp(56px, 11vw, 148px); line-height: .92; font-weight: 800; letter-spacing: -.03em;
+    text-shadow: 0 2px 24px rgba(5,8,26,.9), 0 0 2px rgba(5,8,26,.9);
+  }
+  .brand p { margin-top: 14px; font-size: clamp(15px, 1.5vw, 19px); color: var(--ink); text-shadow: 0 1px 12px rgba(5,8,26,.95); line-height: 1.6; }
+  .brand .hint { margin-top: 10px; font-family: var(--mono); font-size: 12px; letter-spacing: .06em; color: var(--dim); }
+
+  /* 控制 */
+  .controls { position: fixed; right: calc(var(--m) + 14px); bottom: calc(var(--m) + 14px); display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .controls button {
+    font: 500 12px var(--mono); letter-spacing: .08em; color: var(--ink);
+    background: rgba(5,8,26,.55); border: 1px solid var(--line); border-radius: 2px;
+    padding: 12px 14px; min-height: 44px; cursor: pointer; backdrop-filter: blur(4px);
+  }
+  .controls button:hover { border-color: #fff; }
+  .controls button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+  @media (max-width: 640px) {
+    .scale { height: 30vh; right: calc(var(--m) + 2px); }
+    .meta { display: none; }
+    .brand { padding-left: 14px; bottom: calc(var(--m) + 64px); }
+    .controls { left: calc(var(--m) + 14px); right: auto; justify-content: flex-start; }
+    .status { left: calc(var(--m) + 36px); }
+  }
+</style>
+</head>
+<body>
+<canvas id="heat" aria-hidden="true"></canvas>
+<div class="scan"></div>
+<div class="vignette"></div>
+
+<div class="hud" aria-hidden="true">
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+  <div class="status">
+    <div class="rec"><i></i>REC <span id="clock">00:00:00</span></div>
+    <small>DEMO · 模擬熱像，非真實鏡頭</small>
+  </div>
+  <div class="meta">
+    <span>PALETTE <b id="palName">IRON</b></span>
+    <span>RANGE <b>16–38 °C</b></span>
+  </div>
+  <div class="scale">
+    <div class="bar" id="bar"></div>
+    <ol><li>38</li><li>34</li><li>30</li><li>26</li><li>22</li><li>16 °C</li></ol>
+  </div>
+  <div class="lock" id="lock">
+    <div class="box" id="lockBox"></div>
+    <div class="tag" id="lockTag"><b id="lockTemp">--.-°C</b><br>LEPIDOPTERA · LOCKED</div>
+  </div>
+</div>
+
+<main class="brand">
+  <div class="eyebrow">Thermal Observatory</div>
+  <h1>Dex Lab</h1>
+  <p>用熱像儀的眼睛，<br>看見肉眼看不見的溫度。</p>
+  <div class="hint" id="hint">移動游標加熱 · 點擊投下熱源</div>
+</main>
+
+<div class="controls">
+  <button id="palBtn" type="button" aria-label="切換色盤">色盤：鐵虹</button>
+  <button id="motionBtn" type="button" aria-pressed="true" aria-label="動態開關">動態：開</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- 色盤 LUT（256 階，預先計算） ----------
+  const PALETTES = [
+    { id: 'IRON', label: '鐵虹', stops: [
+      [0, 5, 8, 26], [.2, 22, 22, 96], [.4, 112, 22, 132], [.58, 204, 32, 62],
+      [.75, 250, 122, 22], [.9, 255, 222, 64], [1, 255, 255, 255]] },
+    { id: 'RAINBOW', label: '彩虹', stops: [
+      [0, 5, 8, 26], [.2, 24, 60, 220], [.4, 24, 200, 222], [.55, 64, 222, 84],
+      [.7, 250, 232, 50], [.85, 242, 44, 32], [1, 255, 255, 255]] },
+    { id: 'WHITE-HOT', label: '白熱', stops: [
+      [0, 5, 8, 26], [.5, 120, 126, 140], [1, 255, 255, 255]] },
+  ];
+
+  function buildLUT(stops) {
+    const lut = new Uint8ClampedArray(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      let k = 0;
+      while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+      const a = stops[k], b = stops[k + 1];
+      const f = Math.min(1, Math.max(0, (t - a[0]) / (b[0] - a[0])));
+      for (let c = 0; c < 3; c++) lut[i * 3 + c] = a[c + 1] + (b[c + 1] - a[c + 1]) * f;
+    }
+    return lut;
+  }
+  PALETTES.forEach(p => { p.lut = buildLUT(p.stops); });
+
+  // ---------- DOM ----------
+  const $ = id => document.getElementById(id);
+  const canvas = $('heat'), ctx = canvas.getContext('2d');
+  const lockEl = $('lock'), lockBox = $('lockBox'), lockTag = $('lockTag'), lockTemp = $('lockTemp');
+  const palBtn = $('palBtn'), motionBtn = $('motionBtn'), barEl = $('bar'), palName = $('palName');
+  const hint = $('hint'), clock = $('clock');
+
+  // ---------- 狀態 ----------
+  const reduceMq = matchMedia('(prefers-reduced-motion: reduce)');
+  const coarseMq = matchMedia('(pointer: coarse)');
+  let motionOn = !reduceMq.matches;
+  let palIdx = 0;
+  let cols = 0, rows = 0, heat, next, img;
+  let S = 30;                       // 蝴蝶尺度（格）
+  let W = innerWidth, H = innerHeight;
+  let activeUntil = 0;              // 減少動態時，互動後多久內才更新熱場
+  let bodyHeat = 0.93;
+  const butterfly = { x: 0, y: 0, ang: 0, vx: 0, vy: -1, t: 0, flapPhase: 0 };
+
+  // 蝴蝶先畫在離屏小 canvas（程式生成，不會污染 canvas）
+  const off = document.createElement('canvas');
+  const octx = off.getContext('2d', { willReadFrequently: true });
+
+  function setup() {
+    W = innerWidth; H = innerHeight;
+    const small = coarseMq.matches || W < 700;
+    cols = small ? 120 : 240;
+    rows = Math.max(2, Math.round(cols * H / W));
+    canvas.width = off.width = cols;
+    canvas.height = off.height = rows;
+    heat = new Float32Array(cols * rows);
+    next = new Float32Array(cols * rows);
+    img = ctx.createImageData(cols, rows);
+    S = Math.min(cols, rows * 1.6) * (small ? 0.13 : 0.12);
+    lockBox.style.width = lockBox.style.height = (S * 2.5 * W / cols) + 'px';
+    if (!motionOn) placeStatic();
+    for (let i = 0; i < 10; i++) frameStep(1 / 60, true);   // 開頁即有熱像
+  }
+
+  // ---------- 蝴蝶軌跡（Lissajous） ----------
+  function pathAt(t) {
+    return {
+      x: 0.5 + 0.34 * Math.sin(0.37 * t + 0.6) + 0.06 * Math.sin(1.3 * t),
+      y: 0.46 + 0.26 * Math.sin(0.53 * t) + 0.05 * Math.cos(1.1 * t),
+    };
+  }
+  function placeStatic() {
+    butterfly.x = cols * 0.62; butterfly.y = rows * 0.38; butterfly.ang = -0.25; butterfly.flapPhase = 0;
+  }
+  function stepButterfly(dt) {
+    butterfly.t += dt;
+    const p = pathAt(butterfly.t), q = pathAt(butterfly.t + 0.05);
+    butterfly.x = p.x * cols; butterfly.y = p.y * rows;
+    const vx = (q.x - p.x) * cols, vy = (q.y - p.y) * rows;
+    const target = Math.atan2(vy, vx) + Math.PI / 2;      // 蝴蝶頭朝上，故 +90°
+    let d = target - butterfly.ang;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    butterfly.ang += d * Math.min(1, dt * 5);
+    butterfly.flapPhase += dt * 11;
+  }
+
+  // ---------- 蝴蝶剪影 → 熱度 ----------
+  function wingPath(c) {
+    c.beginPath();                                          // 前翅
+    c.moveTo(0.05, -0.12);
+    c.bezierCurveTo(0.6, -1.05, 1.45, -0.95, 1.28, -0.3);
+    c.bezierCurveTo(1.15, 0.06, 0.5, 0.1, 0.05, 0.06);
+    c.closePath();
+    c.moveTo(0.05, 0.02);                                   // 後翅
+    c.bezierCurveTo(0.75, 0.0, 1.05, 0.38, 0.88, 0.82);
+    c.bezierCurveTo(0.72, 1.18, 0.2, 0.92, 0.05, 0.36);
+    c.closePath();
+  }
+  function stampButterfly(flapOn) {
+    const R = S * 1.9;
+    const x0 = Math.max(0, Math.floor(butterfly.x - R)), y0 = Math.max(0, Math.floor(butterfly.y - R));
+    const x1 = Math.min(cols, Math.ceil(butterfly.x + R)), y1 = Math.min(rows, Math.ceil(butterfly.y + R));
+    const w = x1 - x0, h = y1 - y0;
+    if (w < 1 || h < 1) return;
+
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.fillStyle = '#000';
+    octx.fillRect(0, 0, cols, rows);
+    octx.setTransform(S, 0, 0, S, 0, 0);
+    octx.translate(butterfly.x / S, butterfly.y / S);
+    octx.rotate(butterfly.ang);
+
+    const flap = flapOn ? 0.28 + 0.72 * Math.abs(Math.cos(butterfly.flapPhase)) : 1;
+    const grad = octx.createRadialGradient(0, 0, 0, 0, 0, 1.45);
+    grad.addColorStop(0, 'rgb(225,225,225)');
+    grad.addColorStop(0.55, 'rgb(150,150,150)');
+    grad.addColorStop(1, 'rgb(86,86,86)');
+
+    for (const side of [1, -1]) {
+      octx.save();
+      octx.scale(side * flap, 1);
+      octx.fillStyle = grad;
+      wingPath(octx);
+      octx.fill();
+      octx.fillStyle = 'rgb(48,48,48)';                     // 翅上的冷斑
+      for (const [cx, cy, r] of [[0.92, -0.5, 0.15], [0.78, 0.5, 0.11]]) {
+        octx.beginPath(); octx.arc(cx, cy, r, 0, 6.283); octx.fill();
+      }
+      octx.restore();
+    }
+    bodyHeat = 0.9 + 0.05 * Math.sin(butterfly.t * 3.1) + 0.03 * Math.sin(butterfly.t * 7.3);
+    const g = Math.round(bodyHeat * 255);
+    octx.fillStyle = `rgb(${g},${g},${g})`;                 // 身體最熱
+    octx.beginPath(); octx.ellipse(0, 0.1, 0.1, 0.62, 0, 0, 6.283); octx.fill();
+    octx.beginPath(); octx.arc(0, -0.62, 0.11, 0, 6.283); octx.fill();
+    octx.strokeStyle = 'rgb(190,190,190)'; octx.lineWidth = 0.035; octx.lineCap = 'round';
+    octx.beginPath();
+    octx.moveTo(-0.03, -0.7); octx.quadraticCurveTo(-0.2, -1.0, -0.4, -1.08);
+    octx.moveTo(0.03, -0.7); octx.quadraticCurveTo(0.2, -1.0, 0.4, -1.08);
+    octx.stroke();
+
+    const px = octx.getImageData(x0, y0, w, h).data;
+    for (let j = 0; j < h; j++) {
+      for (let i = 0; i < w; i++) {
+        const v = px[(j * w + i) * 4] / 255;
+        if (v <= 0) continue;
+        const k = (y0 + j) * cols + (x0 + i);
+        if (v > heat[k]) heat[k] = v;                       // 取最大值，避免越疊越亮
+      }
+    }
+  }
+
+  // ---------- 游標與點擊加熱 ----------
+  function addHeat(cx, cy, radius, amount) {
+    const x0 = Math.max(0, Math.floor(cx - radius)), x1 = Math.min(cols - 1, Math.ceil(cx + radius));
+    const y0 = Math.max(0, Math.floor(cy - radius)), y1 = Math.min(rows - 1, Math.ceil(cy + radius));
+    const r2 = radius * radius;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+        if (d2 > r2) continue;
+        const f = Math.exp(-3 * d2 / r2) * amount;
+        const k = y * cols + x;
+        heat[k] = Math.min(1, heat[k] + f);
+      }
+    }
+  }
+  let last = null;
+  function toGrid(e) { return { x: e.clientX / W * cols, y: e.clientY / H * rows }; }
+  function onMove(e) {
+    if (e.target.closest && e.target.closest('button')) return;
+    const p = toGrid(e);
+    const from = last || p;
+    const dist = Math.hypot(p.x - from.x, p.y - from.y);
+    const n = Math.max(1, Math.ceil(dist / 2));
+    for (let i = 1; i <= n; i++) {
+      addHeat(from.x + (p.x - from.x) * i / n, from.y + (p.y - from.y) * i / n, cols * 0.022, 0.32);
+    }
+    last = p;
+    wake();
+  }
+  function onDown(e) {
+    if (e.target.closest && e.target.closest('button')) return;
+    const p = toGrid(e);
+    addHeat(p.x, p.y, cols * 0.06, 1.2);
+    last = p;
+    hint.textContent = '熱源已投下 · 看它慢慢冷卻';
+    wake();
+  }
+  addEventListener('pointermove', onMove, { passive: true });
+  addEventListener('pointerdown', onDown, { passive: true });
+  addEventListener('pointerup', () => { last = null; });
+  addEventListener('pointercancel', () => { last = null; });
+  addEventListener('pointerleave', () => { last = null; });
+
+  // ---------- 熱場：擴散 + 冷卻（以 delta time 校正） ----------
+  function diffuse(dt) {
+    const f = Math.min(dt * 60, 3);
+    const k = 0.11 * Math.min(f, 2);
+    const cool = Math.pow(0.987, f);
+    const c = cols, r = rows;
+    for (let y = 0; y < r; y++) {
+      const ym = (y > 0 ? y - 1 : y) * c, yp = (y < r - 1 ? y + 1 : y) * c, yc = y * c;
+      for (let x = 0; x < c; x++) {
+        const xm = x > 0 ? x - 1 : x, xp = x < c - 1 ? x + 1 : x;
+        const v = heat[yc + x];
+        const lap = heat[yc + xm] + heat[yc + xp] + heat[ym + x] + heat[yp + x] - 4 * v;
+        const n = (v + k * lap) * cool;
+        next[yc + x] = n < 0.002 ? 0 : n;
+      }
+    }
+    const tmp = heat; heat = next; next = tmp;            // 雙緩衝交換，不配置新陣列
+  }
+
+  // ---------- 繪製 ----------
+  function render() {
+    const lut = PALETTES[palIdx].lut, d = img.data, n = cols * rows;
+    for (let i = 0; i < n; i++) {
+      let v = heat[i] + (Math.random() - 0.5) * 0.018;     // 輕微雜訊
+      v = v < 0 ? 0 : v > 1 ? 1 : v;
+      const li = ((v * 255) | 0) * 3, o = i * 4;
+      d[o] = lut[li]; d[o + 1] = lut[li + 1]; d[o + 2] = lut[li + 2]; d[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function updateLock() {
+    const px = butterfly.x / cols * W, py = butterfly.y / rows * H;
+    lockEl.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px)`;
+    // 溫度由熱場反算：身體中心附近最大值 → 16–38°C
+    let m = 0;
+    const cx = Math.round(butterfly.x), cy = Math.round(butterfly.y);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const x = cx + dx, y = cy + dy;
+      if (x >= 0 && x < cols && y >= 0 && y < rows) m = Math.max(m, heat[y * cols + x]);
+    }
+    lockTemp.textContent = (16 + m * 22).toFixed(1) + '°C';
+    const half = S * 1.25 * W / cols;
+    lockTag.style.left = (half + 10) + 'px';
+    lockTag.style.top = (-half) + 'px';
+  }
+
+  function frameStep(dt, silent) {
+    if (motionOn) { stepButterfly(dt); }
+    stampButterfly(motionOn);
+    diffuse(dt);
+    if (!silent) { render(); updateLock(); }
+  }
+
+  // ---------- 主迴圈 ----------
+  let raf = 0, lastT = 0, running = false;
+  function loop(t) {
+    raf = 0;
+    if (document.hidden) { running = false; return; }
+    const dt = Math.min(0.05, lastT ? (t - lastT) / 1000 : 1 / 60);
+    lastT = t;
+    if (motionOn || t < activeUntil) {
+      frameStep(dt);
+    }
+    const idle = !motionOn && t >= activeUntil;
+    if (idle) { running = false; lastT = 0; return; }   // 減少動態：靜止時停迴圈
+    raf = requestAnimationFrame(loop);
+  }
+  function wake() {
+    activeUntil = performance.now() + 2500;
+    if (!running && !document.hidden) { running = true; lastT = 0; raf = requestAnimationFrame(loop); }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = 0; running = false; }
+    else wake();
+  });
+
+  // ---------- 控制 ----------
+  function applyPalette() {
+    const p = PALETTES[palIdx];
+    palBtn.textContent = '色盤：' + p.label;
+    palName.textContent = p.id;
+    const stops = [];
+    for (let i = 0; i <= 10; i++) {
+      const li = Math.round((1 - i / 10) * 255) * 3;
+      stops.push(`rgb(${p.lut[li]},${p.lut[li + 1]},${p.lut[li + 2]}) ${i * 10}%`);
+    }
+    barEl.style.background = `linear-gradient(to bottom, ${stops.join(',')})`;
+    render();
+  }
+  palBtn.addEventListener('click', () => { palIdx = (palIdx + 1) % PALETTES.length; applyPalette(); wake(); });
+
+  function applyMotion() {
+    motionBtn.textContent = '動態：' + (motionOn ? '開' : '關');
+    motionBtn.setAttribute('aria-pressed', String(motionOn));
+    if (!motionOn) { placeStatic(); frameStep(1 / 60); }
+    wake();
+  }
+  motionBtn.addEventListener('click', () => { motionOn = !motionOn; applyMotion(); });
+  reduceMq.addEventListener('change', e => { motionOn = !e.matches; applyMotion(); });
+
+  let resizeTimer = 0;
+  addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { setup(); applyPalette(); wake(); }, 120);
+  });
+
+  // 計時器（REC 時間碼）
+  const t0 = Date.now();
+  setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000), p = n => String(n).padStart(2, '0');
+    clock.textContent = `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`;
+  }, 1000);
+
+  // ---------- 啟動 ----------
+  setup();
+  applyPalette();
+  frameStep(1 / 60);
+  if (!motionOn) { hint.textContent = '已依系統設定減少動態 · 移動游標加熱'; }
+  wake();
+})();
+</script>
+</body>
+</html>
