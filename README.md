@@ -6,7 +6,7 @@
 |---|---|---|---|
 | `ui-ux-pro-max` | UI/UX 設計資料庫：80 種風格、192 組配色、74 組字型搭配、120 條 UX 準則、圖示、GSAP 預設、圖表類型、22 種技術棧，附本機搜尋腳本 | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | MIT |
 | `impeccable` 4.8.2 | 設計、重設計、審查、打磨、加動畫：網站、Landing page、Dashboard、App UI、元件、設計系統（DESIGN.md）。含 `/impeccable audit`、`polish`、`animate` 等子命令 | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Apache-2.0 |
-| `web-style-recipes` | 實驗型互動首頁風格配方 11 種（拍貼機、熱像、聲紋、CCTV、萬花筒、像素房間、重力感應…）＋ 20 種有出處的美學風格（瑞士、包浩斯、孟菲斯、Riso、蒸氣波、新粗獷…），可只出給 Claude Design 的 brief 卡 | [lu791019/web-style-recipes](https://github.com/lu791019/web-style-recipes) | 見該 repo |
+| `web-style-recipes` | 實驗型互動首頁風格配方 11 種（拍貼機、熱像、聲紋、CCTV、萬花筒、像素房間、重力感應…）＋ 20 種有出處的美學風格（瑞士、包浩斯、孟菲斯、Riso、蒸氣波、新粗獷…），可只出給 Claude Design 的 brief 卡 | [lu791019/web-style-recipes](https://github.com/lu791019/web-style-recipes) | MIT |
 
 ## 安裝
 
@@ -49,11 +49,11 @@ done
 skills/
   ui-ux-pro-max/      SKILL.md、data/（CSV 資料庫）、scripts/search.py、references/、LICENSE
   impeccable/         SKILL.md、reference/、scripts/、LICENSE、NOTICE.md
-  web-style-recipes/  SKILL.md、README.md、references/、tests/（實測截圖）
+  web-style-recipes/  SKILL.md、README.md、references/、tests/（實測截圖）、LICENSE
 ```
 
 ## 授權與出處
 
 - `ui-ux-pro-max`：MIT，© Next Level Builder，原文照搬，LICENSE 在該目錄。
 - `impeccable`：Apache-2.0，© Paul Bakaus，取自上游 `plugin/skills/impeccable`，LICENSE 與 NOTICE.md 在該目錄。
-- `web-style-recipes`：Dex（lu791019）撰寫；11 種配方題材出處與 20 種美學風格的源流都寫在該 skill 的 README 與 `references/aesthetics.md`。
+- `web-style-recipes`：MIT，© Dex Lu（盧冠宏），LICENSE 在該目錄；11 種配方題材出處與 20 種美學風格的源流都寫在該 skill 的 README 與 `references/aesthetics.md`。
